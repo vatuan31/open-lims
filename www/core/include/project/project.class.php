@@ -3,7 +3,7 @@
  * @package project
  * @version 0.4.0.0
  * @author Roman Konertz <konertz@open-lims.org>
- * @copyright (c) 2008-2016 by Roman Konertz
+ * @copyright (c) 2008-2013 by Roman Konertz
  * @license GPLv3
  * 
  * This file is part of Open-LIMS
@@ -179,20 +179,28 @@ class Project implements ProjectInterface, EventListenerInterface, ItemHolderInt
 				// Create Project
 				if (($project_id = $this->project->create($organisation_unit_id, $parent_project_id, $name, $owner_id, $template_id, $project_quota)) == null)
 				{
-					$transaction->rollback($transaction_id, false);
+					if ($transaction_id != null)
+					{
+						$transaction->rollback($transaction_id, false);
+					}
 					throw new ProjectCreateException("Could not create Project in DB");
 				}
 				else
 				{
-					self::__construct($project_id);
+					$this->__construct($project_id);
 					
 					$project_template = new ProjectTemplate($template_id);
-					$project_all_status_array = $project_template->get_all_status();
+					
+					$workflow = $project_template->get_workflow_object();
+					$start_element = $workflow->get_start_element();
 					
 					$project_has_project_status = new ProjectHasProjectStatus_Access(null);
-					if ($project_has_project_status->create($project_id,$project_all_status_array[0]) != true)
+					if ($project_has_project_status->create($project_id,$start_element->get_id()) != true)
 					{
-						$transaction->rollback($transaction_id, false);
+						if ($transaction_id != null)
+						{
+							$transaction->rollback($transaction_id, false);
+						}
 						throw new ProjectCreateStatusException("Could not create status");
 					}
 					
@@ -211,12 +219,13 @@ class Project implements ProjectInterface, EventListenerInterface, ItemHolderInt
 					$path->add_element($project_id);
 					
 					$project_folder = new ProjectFolder(null);
-					$project_folder->ci_set_project_id($project_id);
-					$project_folder->ci_set_base_folder_id($base_folder_id);
-					if (($folder_id = $project_folder->create()) == null)
+					if (($folder_id = $project_folder->create($project_id, $base_folder_id)) == null)
 					{
-						$project_folder->delete();
-						$transaction->rollback($transaction_id, false);
+						$project_folder->delete(true, true);
+						if ($transaction_id != null)
+						{
+							$transaction->rollback($transaction_id, false);
+						}
 						throw new ProjectCreateFolderException("Could not create main folder");
 					}
 					
@@ -224,35 +233,33 @@ class Project implements ProjectInterface, EventListenerInterface, ItemHolderInt
 					$supplementary_path = new Path($path->get_path_string());
 					$supplementary_path->add_element("supplementary");
 
-					/**
-					 * @toto language of supplementary folder
-					 */
 					$supplementary_folder = Folder::get_instance(null);
-					$supplementary_folder->ci_set_name("supplementary");
-					$supplementary_folder->ci_set_toid($folder_id);
-					$supplementary_folder->ci_set_path($supplementary_path->get_path_string());
-					$supplementary_folder->ci_set_owner_id($owner_id);
-					if (($supplementary_folder->create()) == null)
+					if (($supplementary_folder->create("supplementary", $folder_id, $supplementary_path->get_path_string(), $owner_id, null)) == null)
 					{
 						$project_folder->delete();
-						$transaction->rollback($transaction_id, false);
+						if ($transaction_id != null)
+						{
+							$transaction->rollback($transaction_id, false);
+						}
 						throw new ProjectCreateSupplementaryFolderException("Could not create supplementary folder");
 					}
 					
 					// Status Folder
 					$folder_array = array();
 					
-					foreach($project_all_status_array as $key => $value)
+					$all_status_elements = &$workflow->get_all_status_elements();
+					
+					foreach($all_status_elements as $key => $value)
 					{
-						$project_status_array = $project_template->get_status_requirements($value);
+						$project_status_array = $project_template->get_status_requirements($key);
 
 						if (is_array($project_status_array) and count($project_status_array) >= 1)
 						{
 							foreach($project_status_array as $status_key => $status_value)
 							{
-								if (!in_array($value, $folder_array))
+								if (!in_array($key, $folder_array) and $key > 10)
 								{
-									array_push($folder_array, $value);
+									array_push($folder_array, $key);
 								}
 							}
 						}	
@@ -260,13 +267,14 @@ class Project implements ProjectInterface, EventListenerInterface, ItemHolderInt
 					
 					foreach($folder_array as $key => $value)
 					{
-						$project_status_folder = new ProjectStatusFolder(null);
-						$project_status_folder->ci_set_project_id($project_id);
-						$project_status_folder->ci_set_project_status_id($value);
-						if (($status_folder_id = $project_status_folder->create()) == null)
+						$projet_status_folder = new ProjectStatusFolder(null);
+						if (($status_folder_id = $projet_status_folder->create($project_id, $value)) == null)
 						{
-							$project_folder->delete();
-							$transaction->rollback($transaction_id, false);
+							$project_folder->delete(true, true);
+							if ($transaction_id != null)
+							{
+								$transaction->rollback($transaction_id, false);
+							}
 							throw new ProjectCreateStatusFolderException("Could not create status folder");
 						}
 
@@ -295,18 +303,17 @@ class Project implements ProjectInterface, EventListenerInterface, ItemHolderInt
 	    						$folder_name = strtolower(trim($sub_value));
 	    						$folder_name = str_replace(" ","-",$folder_name);
 	    										
-								$folder_path = new Path($project_status_folder->get_path());
+								$folder_path = new Path($projet_status_folder->get_path());
 								$folder_path->add_element($folder_name);
 								
 								$sub_folder = Folder::get_instance(null);
-								$sub_folder->ci_set_name($sub_value);
-								$sub_folder->ci_set_toid($status_folder_id);
-								$sub_folder->ci_set_path($folder_path->get_path_string());
-								$sub_folder->ci_set_owner_id($user->get_user_id());
-								if ($sub_folder->create() == null)
+								if ($sub_folder->create($sub_value, $status_folder_id, $folder_path->get_path_string(), $user->get_user_id(), null) == null)
 								{
-									$project_folder->delete();
-									$transaction->rollback($transaction_id, false);
+									$project_folder->delete(true, true);
+									if ($transaction_id != null)
+									{
+										$transaction->rollback($transaction_id, false);
+									}
 									throw new ProjectCreateStatusSubFolderException("Could not create status sub folder");
 								}
 	    					}
@@ -314,18 +321,14 @@ class Project implements ProjectInterface, EventListenerInterface, ItemHolderInt
 					}			
 					
 					// Create Project Description
-					/**
-					 * @todo remove fixed id
-					 */
 					$value = Value::get_instance(null);
-					$value->ci_set_folder_id($folder_id);
-					$value->ci_set_owner_id($owner_id);
-					$value->ci_set_type_id(2);
-					$value->ci_set_value($description);
-					if ($value->create() == null)
+					if ($value->create($folder_id, $owner_id, 2, $description) == null)
 					{
-						$project_folder->delete();
-						$transaction->rollback($transaction_id, false);
+						$project_folder->delete(true, true);
+						if ($transaction_id != null)
+						{
+							$transaction->rollback($transaction_id, false);
+						}
 						throw new ProjectCreateDescriptionException("Could not create description value");
 					}
 					
@@ -336,15 +339,21 @@ class Project implements ProjectInterface, EventListenerInterface, ItemHolderInt
 					
 					if ($project_item->link_item() == false)
 					{
-						$project_folder->delete();
-						$transaction->rollback($transaction_id, false);
+						$project_folder->delete(true, true);
+						if ($transaction_id != null)
+						{
+							$transaction->rollback($transaction_id, false);
+						}
 						throw new ProjectCreateDescriptionException("Could not create description item link");
 					}
 					
 					if ($project_item->set_required(true) == false)
 					{
-						$project_folder->delete();
-						$transaction->rollback($transaction_id, false);
+						$project_folder->delete(true, true);
+						if ($transaction_id != null)
+						{
+							$transaction->rollback($transaction_id, false);
+						}
 						throw new ProjectCreateDescriptionException("Could not create description item role");
 					}
 					
@@ -352,14 +361,14 @@ class Project implements ProjectInterface, EventListenerInterface, ItemHolderInt
 					if ($this->template_data_array and is_numeric($this->template_data_type_id))
 					{
 						$value = Value::get_instance(null);				
-						$value->ci_set_folder_id($folder_id);
-						$value->ci_set_owner_id($owner_id);
-						$value->ci_set_type_id($this->template_data_type_id);
-						$value->ci_set_value($this->template_data_array);
-						if ($value->create() == null)
+						
+						if ($value->create($folder_id, $owner_id, $this->template_data_type_id, $this->template_data_array) == null)
 						{
-							$project_folder->delete();
-							$transaction->rollback($transaction_id, false);
+							$project_folder->delete(true, true);
+							if ($transaction_id != null)
+							{
+								$transaction->rollback($transaction_id, false);
+							}
 							throw new ProjectCreateMasterDataException("Could not create master-data value");
 						}
 						
@@ -370,15 +379,21 @@ class Project implements ProjectInterface, EventListenerInterface, ItemHolderInt
 						
 						if ($project_item->link_item() == false)
 						{
-							$project_folder->delete();
-							$transaction->rollback($transaction_id, false);	
+							$project_folder->delete(true, true);
+							if ($transaction_id != null)
+							{
+								$transaction->rollback($transaction_id, false);
+							}	
 							throw new ProjectCreateMasterDataException("Could not create master-data item link");
 						}
 						
 						if ($project_item->set_required(true) == false)
 						{
-							$project_folder->delete();
-							$transaction->rollback($transaction_id, false);
+							$project_folder->delete(true, true);
+							if ($transaction_id != null)
+							{
+								$transaction->rollback($transaction_id, false);
+							}
 							throw new ProjectCreateMasterDataException("Could not create master-data item role");
 						}
 					}
@@ -391,12 +406,15 @@ class Project implements ProjectInterface, EventListenerInterface, ItemHolderInt
 						try
 						{
 							$project_permission = new ProjectPermissionUser(null);
-							$project_permission->create($owner_id, null, null, $project_id, (int)Registry::get_value("project_user_default_permission"), null, 1);
+							$project_permission->create($owner_id, $project_id, (int)Registry::get_value("project_user_default_permission"), null, 1);
 						}
 						catch (ProjectPermissionUserException $e)
 						{
-							$project_folder->delete();
-							$transaction->rollback($transaction_id, false);
+							$project_folder->delete(true, true);
+							if ($transaction_id != null)
+							{
+								$transaction->rollback($transaction_id, false);
+							}
 							throw new ProjectCreatePermissionUserException("Could not create user/owner permission");
 						}
 					
@@ -409,12 +427,15 @@ class Project implements ProjectInterface, EventListenerInterface, ItemHolderInt
 								try
 								{
 									$project_permission = new ProjectPermissionUser(null);
-									$project_permission->create($value, null, null, $project_id, (int)Registry::get_value("project_leader_default_permission"), null, 2);
+									$project_permission->create($value, $project_id, (int)Registry::get_value("project_leader_default_permission"), null, 2);
 								}
 								catch (ProjectPermissionUserException $e)
 								{
-									$project_folder->delete();
-									$transaction->rollback($transaction_id, false);
+									$project_folder->delete(true, true);
+									if ($transaction_id != null)
+									{
+										$transaction->rollback($transaction_id, false);
+									}
 									throw new ProjectCreatePermissionLeaderException("Could not create leader permission");
 								}
 							}
@@ -423,12 +444,15 @@ class Project implements ProjectInterface, EventListenerInterface, ItemHolderInt
 						try
 						{
 							$project_permission = new ProjectPermissionOrganisationUnit(null);
-							$project_permission->create(null, $organisation_unit_id, null, $project_id, (int)Registry::get_value("project_organisation_unit_default_permission"), null, 3);
+							$project_permission->create($organisation_unit_id, $project_id, (int)Registry::get_value("project_organisation_unit_default_permission"), null, 3);
 						}
 						catch (ProjectPermissionOrganisationUnitException $e)
 						{
-							$project_folder->delete();
-							$transaction->rollback($transaction_id, false);
+							$project_folder->delete(true, true);
+							if ($transaction_id != null)
+							{
+								$transaction->rollback($transaction_id, false);
+							}
 							throw new ProjectCreatePermissionOrganisationUnitException("Could not create Organisation Unit permission");
 						}
 					
@@ -442,12 +466,15 @@ class Project implements ProjectInterface, EventListenerInterface, ItemHolderInt
 								try
 								{
 									$project_permission = new ProjectPermissionUser(null);
-									$project_permission->create($value, null, null, $project_id, (int)Registry::get_value("project_quality_manager_default_permission"), null, 5);
+									$project_permission->create($value, $project_id, (int)Registry::get_value("project_quality_manager_default_permission"), null, 5);
 								}
 								catch (ProjectPermissionUserException $e)
 								{
-									$project_folder->delete();
-									$transaction->rollback($transaction_id, false);
+									$project_folder->delete(true, true);
+									if ($transaction_id != null)
+									{
+										$transaction->rollback($transaction_id, false);
+									}
 									throw new ProjectCreatePermissionQualityManagerException("Could not create quality-manager permission");
 								}
 							}
@@ -462,20 +489,26 @@ class Project implements ProjectInterface, EventListenerInterface, ItemHolderInt
 								try
 								{
 									$project_permission = new ProjectPermissionGroup(null);
-									$project_permission->create(null, null, $value, $project_id, (int)Registry::get_value("project_group_default_permission"), null, 4);
+									$project_permission->create($value, $project_id, (int)Registry::get_value("project_group_default_permission"), null, 4);
 								}
 								catch (ProjectPermissionGroupException $e)
 								{
-									$project_folder->delete();
-									$transaction->rollback($transaction_id, false);
+									$project_folder->delete(true, true);
+									if ($transaction_id != null)
+									{
+										$transaction->rollback($transaction_id, false);
+									}
 									throw new ProjectCreatePermissionGroupException("Could not create group permissions");
 								}
 							}
 						}
 					}
 							
-					self::__construct($project_id);
-					$transaction->commit($transaction_id);
+					$this->__construct($project_id);
+					if ($transaction_id != null)
+					{
+						$transaction->commit($transaction_id);
+					}
 					return $project_id;
 				}
 			}
@@ -515,8 +548,11 @@ class Project implements ProjectInterface, EventListenerInterface, ItemHolderInt
     		
     		if ($this->exist_subproject() == true)
     		{
-				$transaction->rollback($transaction_id);
-				throw new ProjectDeleteContainsSubProjectsException();
+				if ($transaction_id != null)
+				{
+					$transaction->rollback($transaction_id);
+					throw new ProjectDeleteContainsSubProjectsException();
+				}
     		}
     		
     		$tmp_project_id = $this->project_id;
@@ -535,7 +571,10 @@ class Project implements ProjectInterface, EventListenerInterface, ItemHolderInt
 	    			}
 	    			catch (ProjectPermissionException $e)
 	    			{
-						$transaction->rollback($transaction_id);
+	    				if ($transaction_id != null)
+	    				{
+							$transaction->rollback($transaction_id);
+						}
 						throw new ProjectDeletePermissionException();
 	    			}
 	    		}
@@ -556,7 +595,10 @@ class Project implements ProjectInterface, EventListenerInterface, ItemHolderInt
 	    			}
 	    			catch (ProjectLogDeleteException $e)
 	    			{
-						$transaction->rollback($transaction_id);
+	    				if ($transaction_id != null)
+	    				{
+							$transaction->rollback($transaction_id);
+						}
 						throw new ProjectDeleteLogException();
 	    			}
 	    		}
@@ -577,7 +619,10 @@ class Project implements ProjectInterface, EventListenerInterface, ItemHolderInt
 	    			}
 	    			catch (ProjectStatusDeleteException $e)
 	    			{
-						$transaction->rollback($transaction_id);
+	    				if ($transaction_id != null)
+	    				{
+							$transaction->rollback($transaction_id);
+						}
 						throw new ProjectDeleteStatusException();
 	    			}
 	    		}
@@ -593,7 +638,10 @@ class Project implements ProjectInterface, EventListenerInterface, ItemHolderInt
 	    			$project_link = new ProjectLink_Access($value);
 	    			if ($project_link->delete() == false)
 	    			{
-						$transaction->rollback($transaction_id);
+	    				if ($transaction_id != null)
+	    				{
+							$transaction->rollback($transaction_id);
+						}
 						throw new ProjectDeleteLinkException();
 	    			}
 	    		}
@@ -610,7 +658,10 @@ class Project implements ProjectInterface, EventListenerInterface, ItemHolderInt
 					$project_item->set_item_id($item_value);
 					if ($project_item->unlink_item() == false)
 					{
-						$transaction->rollback($transaction_id);
+						if ($transaction_id != null)
+						{
+							$transaction->rollback($transaction_id);
+						}
 						throw new ProjectDeleteItemException();
 					}
 				}
@@ -626,7 +677,10 @@ class Project implements ProjectInterface, EventListenerInterface, ItemHolderInt
     				$project_task = new ProjectTask($value);
     				if ($project_task->delete() == false)
     				{
-						$transaction->rollback($transaction_id);
+    					if ($transaction_id != null)
+    					{
+							$transaction->rollback($transaction_id);
+						}
 						throw new ProjectDeleteTaskException();
     				}
     			}
@@ -635,32 +689,44 @@ class Project implements ProjectInterface, EventListenerInterface, ItemHolderInt
     		// Extension Links
     		if (ProjectHasExtensionRun_Access::delete_by_project_id($tmp_project_id) == false)
     		{
-				$transaction->rollback($transaction_id);
+    			if ($transaction_id != null)
+    			{
+					$transaction->rollback($transaction_id);
+				}
 				throw new ProjectDeleteException("Extension delete failed");
-    		}
-    		
-    		$project_folder_id = ProjectFolder::get_folder_by_project_id($tmp_project_id);
-    		$project_folder = new ProjectFolder($project_folder_id);
-    		if ($project_folder->delete() == false)
-    		{
-    			$transaction->rollback($transaction_id);
-    			throw new ProjectDeleteFolderException();
     		}
     		
     		// Project DB Entry
     		if ($this->project->delete() == false)
     		{
-				$transaction->rollback($transaction_id);
+    			if ($transaction_id != null)
+    			{
+					$transaction->rollback($transaction_id);
+				}
 				throw new ProjectDeleteException("Database delete failed");
     		}
-    		
-    		/**
-    		 * @todo post event for physical folder delete
-    		 */
-    		
-    		$this->__destruct();	
-			$transaction->commit($transaction_id);
-			return true;
+    		else
+    		{
+    			$this->__destruct();
+	    		$project_folder_id = ProjectFolder::get_folder_by_project_id($tmp_project_id);
+	    		$project_folder = new ProjectFolder($project_folder_id);
+	    		if ($project_folder->delete(true, true) == false)
+	    		{
+	    			if ($transaction_id != null)
+	    			{
+						$transaction->rollback($transaction_id);
+					}
+					throw new ProjectDeleteFolderException();
+	    		}
+	    		else
+	    		{
+	    			if ($transaction_id != null)
+	    			{
+						$transaction->commit($transaction_id);
+					}
+					return true;
+	    		}
+    		}
     	}
     	else
     	{
@@ -800,126 +866,65 @@ class Project implements ProjectInterface, EventListenerInterface, ItemHolderInt
     }
     
     /**
-     * @see ProjectInterface::get_all_status_array()
-     * @return array
+     * @see ProjectInterface::get_status_workflow_object()
+     * @return object
      */
-    public function get_all_status_array()
+    public function get_status_workflow_object()
     {
     	global $runtime_data;
     	
     	if ($this->project_id and $this->project)
     	{
-			if ($runtime_data->is_object_data($this, "PROJECT_ALL_STATUS_ARRAY") == true)
+			if ($runtime_data->is_object_data($this, "PROJECT_WORKFLOW_OBJECT_".$this->project_id) == true)
 			{
-				return $runtime_data->read_object_data($this, "PROJECT_ALL_STATUS_ARRAY");	
+				return $runtime_data->read_object_data($this, "PROJECT_WORKFLOW_OBJECT_".$this->project_id);	
 			}
 			else
 			{
 	    		$return_array = array();
 	    		
 	    		$project_template = new ProjectTemplate($this->project->get_template_id());
-	    		$all_status_array = $project_template->get_all_status();
 	    		
-	    		if (is_array($all_status_array) and count($all_status_array) >= 1)
-	    		{
-					$project_canceled 	= false;
-					$status_found 		= false;	
-					$datetime 			= null;	
-		
-	    			foreach($all_status_array as $key => $value)
-	    			{
-	    				$temp_array = array();
-	    				
-	    				$project_has_status_array = ProjectHasProjectStatus_Access::list_entries_by_project_id($this->project_id);
-	    				
-	    				if (is_array($project_has_status_array) and count($project_has_status_array) >= 1)
-	    				{
-	    					foreach($project_has_status_array as $status_key => $status_value)
-	    					{
-	    						$project_has_project_status = new ProjectHasProjectStatus_Access($status_value);
-	    						
-	    						if ($status_found == true and $datetime == null)
-	    						{
-	    							$datetime = $project_has_project_status->get_datetime();
-	    						}
-	    						
-	    						if ($project_has_project_status->get_status_id() == $value)
-	    						{
-	    							$status_found = true;
-	    						}
-	    						
-	    						if ($project_has_project_status->get_status_id() == 0)
-	    						{
-	    							$project_canceled = true;
-	    						}
-	    					}
-	    				}
-	    				
-	    				$temp_array['id'] = $value;
-	    				
-	    				$status_attribute_array = $project_template->get_status_attributes($value);
-	    				
-	    				if ($status_attribute_array['requirement'] == "optional")
-	    				{
-	    					$temp_array['optional'] = true;
-	    				}
-	    				else
-	    				{
-	    					$temp_array['optional'] = false;
-	    				}
-	    				
-	    				if ($status_found == true)
-	    				{
-	    					if ($datetime == null)
-	    					{
-	    						$temp_array['datetime'] = date("Y-m-d H:i:s");
-	    					}
-	    					else
-	    					{
-	    						$temp_array['datetime'] = $datetime;
-	    						$datetime = null;
-	    					}
-	    					
-							if ($project_canceled == true)
-							{
-								$temp_array['status'] = 3;
-							}
-							else
-							{
-								$temp_array['status'] = 1;	
-							}
-	    					
-	    					if (($last_element = array_pop($return_array)) != null)
-	    					{
-	    						$last_element['status'] = 2;
-	    						array_push($return_array, $last_element);
-	    					}
-	    					
-	    					$status_found = false;
-	    					$datetime = null;
-	    				}
-	    				else
-	    				{
-	    					$temp_array['status'] = 0;
-	    				}
-						array_push($return_array, $temp_array);
-	    			}
-	    			
-	    			if ($this->get_current_status_id() == 2)
-	    			{
-	    				if (($last_element = array_pop($return_array)) != null)
-	    				{
-							$last_element['status'] = 2;
-							array_push($return_array, $last_element);
-						}
-	    			}
-	    			$runtime_data->write_object_data($this, "PROJECT_ALL_STATUS_ARRAY", $return_array);
-	    			return $return_array;
-	    		}
-	    		else
-	    		{
-	    			return null;
-	    		}
+	    		$workflow = $project_template->get_workflow_object();
+	    		
+	    		
+				$all_status_elements = &$workflow->get_all_status_elements();
+				if (is_array($all_status_elements) and count($all_status_elements) >= 1)
+    			{
+    				foreach($all_status_elements as $key => $value)
+    				{
+    					$project_status = new ProjectStatus($key);
+    					$value->attach("name", $project_status->get_name());
+    				}
+    			}
+	    		
+    			
+	    		$project_status_array = ProjectHasProjectStatus_Access::list_status_id_by_project_id($this->project_id);		
+    			if (is_array($project_status_array) and count($project_status_array) >= 1)
+    			{
+    				foreach($project_status_array as $status_key => $status_value)
+    				{
+    					$workflow->set_status_visited($status_value);
+    					
+    					if ($status_value == 0)
+    					{
+    						$value->attach("cancel", true);
+    					}
+    				}
+    			}
+    			
+    			
+				$project_current_status_array = ProjectHasProjectStatus_Access::list_current_status_id_by_project_id($this->project_id);		
+    			if (is_array($project_current_status_array) and count($project_current_status_array) >= 1)
+    			{
+    				foreach($project_current_status_array as $status_key => $status_value)
+    				{
+    					$workflow->set_status_active($status_value);
+    				}
+    			}
+    			
+    			$runtime_data->write_object_data($this, "PROJECT_WORKFLOW_OBJECT_".$this->project_id, $workflow);	
+    			return $workflow;
 			}
     	}
     	else
@@ -1297,6 +1302,7 @@ class Project implements ProjectInterface, EventListenerInterface, ItemHolderInt
     }
     
     /**
+     * @todo !!!
      * @see ProjectInterface::is_sub_item_required()
      * @param integer $parent_pos_id
      * @param integer $status_id
@@ -1308,100 +1314,96 @@ class Project implements ProjectInterface, EventListenerInterface, ItemHolderInt
     	if ($this->project_id and $this->project and is_numeric($status_id))
     	{
     		$project_template = new ProjectTemplate($this->project->get_template_id());
-
-    		$start_status = false;
-    		$all_status_array = $project_template->get_all_status();
+    		$workflow = $this->get_status_workflow_object();
+    		$workflow_activity_array = $workflow->get_all_status_elements();
     		
-    		foreach ($all_status_array as $key => $current_status_id)
+    		// $status_relation = new ProjectStatusRelation($this->project_id, $status_id);
+    			    	
+    		//while ($status_relation->is_less($this->get_current_status_id()) or $status_relation->get_current() == $this->get_current_status_id())
+    		foreach($workflow_activity_array as $current_status_id => $current_workflow_object)
     		{
-    			if ($current_status_id == $status_id)
-    			{
-    				$start_status = true;
-    			} 
     			
-    			if ($start_status === true)
-    			{
-		    		$requirements_array = $project_template->get_status_requirements($current_status_id);
-					
-					$counter = 0;
-					$sub_item_counter = 0;
-					$fulfilled_counter = 0;
-					$in_item = false;
-					
-					if (is_array($requirements_array) and count($requirements_array) >= 1)
-					{
-						$project_item = new ProjectItem($this->project_id);
-		
-						$item_array = $project_item->get_project_status_items_with_pos_id($current_status_id);					
-						$item_type_array = Item::list_types();
-						
-						foreach($requirements_array as $key => $value)
-						{
-							// ITEM
-							if ($value['xml_element'] == "item" and !$value['close'])
-							{
-								$in_item = true;
-								
-								if ($value['pos_id'])
-								{
-									$pos_id = $value['pos_id'];
-								}
-								else
-								{
-									$pos_id = $counter;
-								}
-								
-								if ($pos_id != $parent_pos_id)
-								{
-									continue;
-								}
-								else
-								{
-									if (is_array($item_array) and count($item_array) >= 1)
-									{	
-										$item_instance_array = array();
+    			//$current_status_id = $status_relation->get_current();
+	    		$requirements_array = $project_template->get_status_requirements($current_status_id);
 				
-										foreach($item_array as $item_key => $item_value)
+				$counter = 0;
+				$sub_item_counter = 0;
+				$fulfilled_counter = 0;
+				$in_item = false;
+				
+				if (is_array($requirements_array) and count($requirements_array) >= 1)
+				{
+					$project_item = new ProjectItem($this->project_id);
+	
+					$item_array = $project_item->get_project_status_items_with_pos_id($current_status_id);	
+					$item_type_array = Item::list_types();
+					
+					foreach($requirements_array as $key => $value)
+					{
+						// ITEM
+						if ($value['xml_element'] == "item" and !$value['close'])
+						{
+							$in_item = true;
+							
+							if ($value['pos_id'])
+							{
+								$pos_id = $value['pos_id'];
+							}
+							else
+							{
+								$pos_id = $counter;
+							}
+							
+							if ($pos_id != $parent_pos_id)
+							{
+								continue;
+							}
+							else
+							{
+								if (is_array($item_array) and count($item_array) >= 1)
+								{	
+									$item_instance_array = array();
+			
+									foreach($item_array as $item_key => $item_value)
+									{
+										if (is_array($item_type_array) and count($item_type_array) >= 1)
 										{
-											if (is_array($item_type_array) and count($item_type_array) >= 1)
+											foreach ($item_type_array as $item_type => $item_handling_class)
 											{
-												foreach ($item_type_array as $item_type => $item_handling_class)
+												if (class_exists($item_handling_class))
 												{
-													if (class_exists($item_handling_class))
+													if ($item_handling_class::is_kind_of($item_type, $item_value['item_id']) == true and $item_value['pos_id'] == $pos_id and $item_value['pos_id'] !== null and $pos_id !== null)
 													{
-														if ($item_handling_class::is_kind_of($item_type, $item_value['item_id']) == true and $item_value['pos_id'] == $pos_id and $item_value['pos_id'] !== null and $pos_id !== null)
-														{
-															$item_instance_array[$fulfilled_counter] =  $item_handling_class::get_instance_by_item_id($item_value['item_id']);
-															$fulfilled_counter++;
-															break;
-														}
+														$item_instance_array[$fulfilled_counter] =  $item_handling_class::get_instance_by_item_id($item_value['item_id']);
+														$fulfilled_counter++;
+														break;
 													}
 												}
 											}
 										}
-										
-										if (is_array($item_instance_array) and count($item_instance_array) >= 1)
-										{
-											if ($value['inherit'] == "all" or $force_inherit == true)
-											{									
-												if (is_array($item_instance_array) and count($item_instance_array) >= 1 and $fulfilled_counter >= 1)
+									}
+									
+									if (is_array($item_instance_array) and count($item_instance_array) >= 1)
+									{
+										if ($value['inherit'] == "all" or $force_inherit == true)
+										{									
+											if (is_array($item_instance_array) and count($item_instance_array) >= 1 and $fulfilled_counter >= 1)
+											{
+												foreach($item_instance_array as $object_key => $object_value)
 												{
-													foreach($item_instance_array as $object_key => $object_value)
-													{
-														if (is_object($object_value))
+													if (is_object($object_value))
+													{	
+														if ($object_value instanceof ItemHolderInterface)
 														{	
-															if ($object_value instanceof ItemHolderInterface)
-															{	
-																$sub_item_array = $object_value->get_item_add_information();
-																
-																if (is_array($sub_item_array) and count($sub_item_array) >= 1)
+															$sub_item_array = $object_value->get_item_add_information();
+															
+															if (is_array($sub_item_array) and count($sub_item_array) >= 1)
+															{
+																foreach($sub_item_array as $sub_item_key => $sub_item_value)
 																{
-																	foreach($sub_item_array as $sub_item_key => $sub_item_value)
+																	if ($sub_item_value['pos_id'] == $sub_item_pos_id)
 																	{
-																		if ($sub_item_value['pos_id'] == $sub_item_pos_id)
-																		{
-																			return $current_status_id;
-																		}
+																		return $current_status_id;
 																	}
 																}
 															}
@@ -1410,28 +1412,55 @@ class Project implements ProjectInterface, EventListenerInterface, ItemHolderInt
 												}
 											}
 										}
-										else
-										{
-											return null;
-										}
+									}
+									else
+									{
+										return null;
 									}
 								}
+								else
+								{
+									return null;
+								}
 							}
-							
-							if ($value['xml_element'] == "item" and $value['close'] == "1")
-							{
-								$counter++;
-								$sub_item_counter = 0;
-								$in_item = false;
+						}
+						
+						if ($value['xml_element'] == "item" and $value['close'] == "1")
+						{
+							$counter++;
+							$sub_item_counter = 0;
+							$in_item = false;
+						}
+						
+						
+						// ITEMI
+						if ($value['xml_element'] == "itemi" and !$value['close'])
+						{
+							if (is_numeric($value['parent_status']) and is_numeric($value['parent_pos_id']) and is_numeric($value['pos_id']))
+							{		
+								if ($value['pos_id'] == $sub_item_pos_id and $value['parent_pos_id'] == $parent_pos_id)
+								{
+									return $current_status_id;
+								}
+								else
+								{
+									continue;
+								}
 							}
-							
-							
-							// ITEMI
-							if ($value['xml_element'] == "itemi" and !$value['close'])
+							elseif($in_item == true and is_array($item_instance_array) and count($item_instance_array) >= 1)
 							{
-								if (is_numeric($value['parent_status']) and is_numeric($value['parent_pos_id']) and is_numeric($value['pos_id']))
-								{		
-									if ($value['pos_id'] == $sub_item_pos_id and $value['parent_pos_id'] == $parent_pos_id)
+								foreach($item_instance_array as $object_key => $object_value)
+								{
+									if (is_numeric($value['pos_id']))
+									{
+										$pos_id = $value['pos_id'];
+									}
+									else
+									{
+										$pos_id = $sub_item_counter;
+									}
+									
+									if ($pos_id == $sub_item_pos_id)
 									{
 										return $current_status_id;
 									}
@@ -1440,34 +1469,12 @@ class Project implements ProjectInterface, EventListenerInterface, ItemHolderInt
 										continue;
 									}
 								}
-								elseif($in_item == true and is_array($item_instance_array) and count($item_instance_array) >= 1)
-								{
-									foreach($item_instance_array as $object_key => $object_value)
-									{
-										if (is_numeric($value['pos_id']))
-										{
-											$pos_id = $value['pos_id'];
-										}
-										else
-										{
-											$pos_id = $sub_item_counter;
-										}
-										
-										if ($pos_id == $sub_item_pos_id)
-										{
-											return $current_status_id;
-										}
-										else
-										{
-											continue;
-										}
-									}
-									$sub_item_counter++;
-								}
+								$sub_item_counter++;
 							}
 						}
 					}
-    			}
+				}
+    			// $status_relation->set_next();
     		}
     		
     		return null;
@@ -1488,14 +1495,18 @@ class Project implements ProjectInterface, EventListenerInterface, ItemHolderInt
     	if ($this->project_id and $this->project and is_numeric($parent_pos_id))
     	{
     		$project_template = new ProjectTemplate($this->project->get_template_id());
-    		$all_status_array = $project_template->get_all_status();
+    		// $status_relation = new ProjectStatusRelation($this->project_id, $this->get_current_status_id());
 
-	    	$current_status_id = $this->get_current_status_id();
+    		$workflow = $this->get_status_workflow_object();
+    		$workflow_activity_array = $workflow->get_all_status_elements();
+    		
     		$return_array = array();
-	    	
-    		foreach ($all_status_array as $key => $status_id)
+    		
+    		// while ($status_relation->get_current() != null)
+    		foreach($workflow_activity_array as $current_status_id => $current_workflow_object)
     		{
-	    		$requirements_array = $project_template->get_status_requirements($status_id);
+    			// $current_status_id = $status_relation->get_current();
+	    		$requirements_array = $project_template->get_status_requirements($current_status_id);
 				
 				$counter = 0;
 				$sub_item_counter = 0;
@@ -1505,7 +1516,7 @@ class Project implements ProjectInterface, EventListenerInterface, ItemHolderInt
 				{
 					foreach($requirements_array as $key => $value)
 					{
-						if ($status_id == $current_status_id)
+						if ($current_status_id == $this->get_current_status_id())
 						{
 							if ($value['xml_element'] == "item" and !$value['close'])
 							{
@@ -1537,13 +1548,14 @@ class Project implements ProjectInterface, EventListenerInterface, ItemHolderInt
 						// ITEMI
 						if ($value['xml_element'] == "itemi" and !$value['close'])
 						{
+							// Is an ITEMI-element with status relation in another element?
 							if (is_numeric($value['parent_status']) and is_numeric($value['parent_pos_id']) and is_numeric($value['pos_id']))
 							{		
 								if ($value['parent_pos_id'] == $parent_pos_id and $value['parent_status'] == $current_status_id)
 								{
-									if (!in_array(array("position_id" => $value['pos_id'], "status_id" => $status_id), $return_array))
+									if (!in_array(array("position_id" => $pos_id, "status_id" => $current_status_id), $return_array))
 									{
-										array_push($return_array, array("position_id" => $value['pos_id'], "status_id" => $status_id));
+										array_push($return_array, array("position_id" => $value['pos_id'], "status_id" => $current_status_id));
 									}
 								}
 								else
@@ -1562,9 +1574,9 @@ class Project implements ProjectInterface, EventListenerInterface, ItemHolderInt
 									$pos_id = $sub_item_counter;
 								}
 								
-								if (!in_array(array("position_id" => $pos_id, "status_id" => $status_id), $return_array))
+								if (!in_array(array("position_id" => $pos_id, "status_id" => $current_status_id), $return_array))
 								{
-									array_push($return_array, array("position_id" => $pos_id, "status_id" => $status_id));
+									array_push($return_array, array("position_id" => $pos_id, "status_id" => $current_status_id));
 								}
 								$sub_item_counter++;
 							}
@@ -1642,7 +1654,10 @@ class Project implements ProjectInterface, EventListenerInterface, ItemHolderInt
 				{
 					if (ProjectTask::check_over_time_tasks($this->project_id) == false)
 					{
-						$transaction->rollback($transaction_id);
+						if ($transaction_id != null)
+						{
+							$transaction->rollback($transaction_id);
+						}
 						throw new ProjectSetNextStatusException();
 					}
 					
@@ -1651,24 +1666,36 @@ class Project implements ProjectInterface, EventListenerInterface, ItemHolderInt
 					{
 						if ($project_log->link_status($next_status_id) == true)
 						{
-							$transaction->commit($transaction_id);
+							if ($transaction_id != null)
+							{
+								$transaction->commit($transaction_id);
+							}
 							return true;
 						}
 						else
 						{
-							$transaction->rollback($transaction_id);
+							if ($transaction_id != null)
+							{
+								$transaction->rollback($transaction_id);
+							}
 							throw new ProjectSetNextStatusException();
 						}
 					}
 					else
 					{
-						$transaction->rollback($transaction_id);
+						if ($transaction_id != null)
+						{
+							$transaction->rollback($transaction_id);
+						}
 						throw new ProjectSetNextStatusException();
 					}
 				}
 				else
 				{
-					$transaction->rollback($transaction_id);
+					if ($transaction_id != null)
+					{
+						$transaction->rollback($transaction_id);
+					}
 					throw new ProjectSetNextStatusException();
 				}
 			}
@@ -1834,19 +1861,28 @@ class Project implements ProjectInterface, EventListenerInterface, ItemHolderInt
 					$destination_id = constant("PROJECT_FOLDER_ID");
 					if ($folder->move_folder($destination_id, false) == false)
 					{
-						$transaction->rollback($transaction_id);
+						if ($transaction_id != null)
+						{
+							$transaction->rollback($transaction_id);
+						}
 						throw new ProjectMoveFolderException();
 					}
 					
 					if ($this->project->set_toid_project(null) == false)
 					{
-						$transaction->rollback($transaction_id);
+						if ($transaction_id != null)
+						{
+							$transaction->rollback($transaction_id);
+						}
 						throw new ProjectMoveException();
 					}
 					
 					if ($this->project->set_toid_organ_unit($organisation_unit_id) == false)
 					{
-						$transaction->rollback($transaction_id);
+						if ($transaction_id != null)
+						{
+							$transaction->rollback($transaction_id);
+						}
 						throw new ProjectMoveException();
 					}			
 					
@@ -1854,23 +1890,35 @@ class Project implements ProjectInterface, EventListenerInterface, ItemHolderInt
 			
 					if ($project_security->change_owner_permission($this->get_owner_id()) == false)
 					{
-						$transaction->rollback($transaction_id);
+						if ($transaction_id != null)
+						{
+							$transaction->rollback($transaction_id);
+						}
 						throw new ProjectMovePermissionException();
 					}
 					
 					if ($project_security->change_ou_user_permission($organisation_unit_id) == false)
 					{
-						$transaction->rollback($transaction_id);
+						if ($transaction_id != null)
+						{
+							$transaction->rollback($transaction_id);
+						}
 						throw new ProjectMovePermissionException();
 					}
 					
 					if ($project_security->change_organisation_unit_permission($organisation_unit_id) == false)
 					{
-						$transaction->rollback($transaction_id);
+						if ($transaction_id != null)
+						{
+							$transaction->rollback($transaction_id);
+						}
 						throw new ProjectMovePermissionException();
 					}
 					
-					$transaction->commit($transaction_id);
+					if ($transaction_id != null)
+					{
+						$transaction->commit($transaction_id);
+					}
 					return true;
 				}
 				else
@@ -1927,7 +1975,10 @@ class Project implements ProjectInterface, EventListenerInterface, ItemHolderInt
 							}
 							catch (ProjectPermissionException $e)
 							{
-								$transaction->rollback($transaction_id);
+								if ($transaction_id != null)
+								{
+									$transaction->rollback($transaction_id);
+								}
 								throw new ProjectMovePermissionException();
 							}
 						}
@@ -1935,13 +1986,19 @@ class Project implements ProjectInterface, EventListenerInterface, ItemHolderInt
 					
 					if ($this->project->set_toid_organ_unit(null) == false)
 					{
-						$transaction->rollback($transaction_id);
+						if ($transaction_id != null)
+						{
+							$transaction->rollback($transaction_id);
+						}
 						throw new ProjectMoveException();
 					}
 					
 					if ($this->project->set_toid_project($project_id) == false)
 					{
-						$transaction->rollback($transaction_id);
+						if ($transaction_id != null)
+						{
+							$transaction->rollback($transaction_id);
+						}
 						throw new ProjectMoveException();
 					}
 					
@@ -1950,11 +2007,17 @@ class Project implements ProjectInterface, EventListenerInterface, ItemHolderInt
 					$destination_id = ProjectFolder::get_folder_by_project_id($project_id);
 					if ($folder->move_folder($destination_id, false) == false)
 					{
-						$transaction->rollback($transaction_id);
+						if ($transaction_id != null)
+						{
+							$transaction->rollback($transaction_id);
+						}
 						throw new ProjectMoveFolderException();
 					}
 					
-					$transaction->commit($transaction_id);
+					if ($transaction_id != null)
+					{
+						$transaction->commit($transaction_id);
+					}
 					return true;
 				}
 				else
@@ -2462,18 +2525,27 @@ class Project implements ProjectInterface, EventListenerInterface, ItemHolderInt
     		
     		if ($folder->set_name($name) == false)
 			{
-				$transaction->rollback($transaction_id);
+				if ($transaction_id != null)
+				{
+					$transaction->rollback($transaction_id);
+				}
 				return false;
 			}
 			
 			if ($this->project->set_name($name) == false)
     		{
-				$transaction->rollback($transaction_id);
+    			if ($transaction_id != null)
+				{
+					$transaction->rollback($transaction_id);
+				}
 				return false;
     		}
     		else
     		{
-				$transaction->commit($transaction_id);
+    			if ($transaction_id != null)
+				{
+					$transaction->commit($transaction_id);
+				}
 				return true;
     		}
     	}
@@ -2526,26 +2598,19 @@ class Project implements ProjectInterface, EventListenerInterface, ItemHolderInt
 	
 	/**
 	 * @see ItemHolderInterface::get_item_holder_value()
-	 * @param string $address
-	 * @param integer $position_id
-	 * @param integer $status_id
+	 * @param stirng $address
 	 * @return mixed
 	 */
-	public final function get_item_holder_value($address, $position_id = null, $status_id = null)
+	public final function get_item_holder_value($address, $position_id = null)
 	{
 		if ($this->project_id and $this->project)
 		{		
-			if ($status_id == null)
-			{
-				$status_id = $this->get_current_status_id();
-			}
-			
 			switch($address):
 			
 				case "folder_id":
-					$folder_id = ProjectStatusFolder::get_folder_by_project_id_and_project_status_id($this->project_id,$status_id);
+					$folder_id = ProjectStatusFolder::get_folder_by_project_id_and_project_status_id($this->project_id,$this->get_current_status_id());
 												
-					$sub_folder_id = $this->get_sub_folder($position_id, $status_id);
+					$sub_folder_id = $this->get_sub_folder($position_id, $this->get_current_status_id());
 					
 					if (is_numeric($sub_folder_id))
 					{

@@ -451,84 +451,19 @@ class ProjectAjax
 		
 		if ($_GET['project_id'])
 		{
+			$element_string = "";
+			
 			$project = new Project($_GET['project_id']);
 			
+			$workflow = $project->get_status_workflow_object();	
+			$workflow_array = Workflow::get_drawable_element_list($workflow->get_start_element(), $workflow->get_all_active_elements());
+							
+			require_once(__DIR__."/../../workflow/common/io/workflow_common.io.php");
+				
+			$element_string = WorkflowCommonIO::draw_workflow($workflow_array, 3);
+
 			$template = new HTMLTemplate("project/ajax/detail_status.html");
-		
-			// Status Bar
-			$all_status_array = $project->get_all_status_array();				
-			$result = array();
-			$counter = 0;
-			
-			if (is_array($all_status_array) and count($all_status_array) >= 1)
-			{
-				foreach($all_status_array as $key => $value)
-				{						
-					$project_status = new ProjectStatus($value['id']);
-					
-					if ($value['optional'] == true)
-					{
-						$result[$counter]['name'] = $project_status->get_name()." (optional)";
-					}
-					else
-					{
-						$result[$counter]['name'] = $project_status->get_name();	
-					}
-					
-					if ($value['status'] == 3)
-					{
-						$result[$counter]['icon'] = "<img src='images/icons/status_cancel.png' alt='R' />";
-					}
-					elseif($value['status'] == 2)
-					{
-						$result[$counter]['icon'] = "<img src='images/icons/status_ok.png' alt='R' />";
-					}elseif($value['status'] == 1)
-					{
-						$result[$counter]['icon']	= "<img src='images/icons/status_run.png' alt='R' />";
-					}
-					else
-					{
-						$result[$counter]['icon']	= "";
-					}
-					
-					if (!($counter % 2))
-					{
-						$result[$counter]['tr_class'] = " class='trLightGrey'";
-					}
-					else
-					{
-						$result[$counter]['tr_class'] = "";
-					}
-					
-					$counter++;
-				}
-				
-				$project_status = new ProjectStatus(2);
-				$result[$counter]['name'] = $project_status->get_name();
-				
-				if ($project->get_current_status_id() == 2)
-				{
-					$result[$counter]['icon'] = "<img src='images/icons/status_ok.png' alt='R' />";
-				}
-				else
-				{
-					$result[$counter]['icon']	= "";
-				}
-				
-				if (!($counter % 2))
-				{
-					$result[$counter]['tr_class'] = " class='trLightGrey'";
-				}
-				else
-				{
-					$result[$counter]['tr_class'] = "";
-				}
-				
-				$counter++;
-			}
-			
-			$template->set_var("status",$result);
-			
+			$template->set_var("elements",$element_string);
 			$template->output();
 		}
 		else

@@ -1,38 +1,25 @@
-
 /* Project Detail */
 #ProjectDetailLeft
 {
 	float: left;
-	width: 375px;	
+	width: 390px;	
 }
 #ProjectDetailRight
 {
 	border-left: 1px #C0C0C0 dotted;
 	float: right;
-	width: 370px;	
+	width: 355px;	
 }
 #ProjectDetailClear
 {
 	clear: both;
 }
 
+#ProjectDetailStatusWorkflow
+{
+	margin-bottom: 10px;
+}
 
-
-#ProjectDetailStatus div
-{
-	margin: 5px;	
-}
-.ProjectDetailStatusTable
-{
-	width: 100%;
-	border-spacing: 0;
-}
-.ProjectDetailStatusTable td
-{
-	padding-left: 5px;
-	padding-right: 5px;
-	line-height: 22px;
-}
 
 /* Project Proceed */
 .ProdectDetailProceedTable

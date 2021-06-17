@@ -3,7 +3,7 @@
  * @package project
  * @version 0.4.0.0
  * @author Roman Konertz <konertz@open-lims.org>
- * @copyright (c) 2008-2016 by Roman Konertz
+ * @copyright (c) 2008-2013 by Roman Konertz
  * @license GPLv3
  * 
  * This file is part of Open-LIMS
@@ -151,18 +151,27 @@ class ProjectTemplate implements ProjectTemplateInterface
 				$oldl = new Oldl(null);
 				if (($oldl_id = $oldl->create($data_entity_id)) == null)
 				{
-					$transaction->rollback($transaction_id);
+					if ($transaction_id != null)
+					{
+						$transaction->rollback($transaction_id);
+					}
 					throw new ProjectTemplateCreateOLDLCreateException();
 				}
 		
 				if ($this->project_template->create($id, $title, $category_id, $parent_template, $oldl_id) == false)
 				{
-					$transaction->rollback($transaction_id);
+					if ($transaction_id != null)
+					{
+						$transaction->rollback($transaction_id);
+					}
 					throw new ProjectTemplateCreateException("DB Failed");
 				}
 				else
 				{
-					$transaction->commit($transaction_id);
+					if ($transaction_id != null)
+					{
+						$transaction->commit($transaction_id);
+					}
 					return true;
 				}	
 			}
@@ -205,18 +214,27 @@ class ProjectTemplate implements ProjectTemplateInterface
 			
 			if ($this->project_template->delete() == false)
 			{
-				$transaction->rollback($transaction_id);
+				if ($transaction_id != null)
+				{
+					$transaction->rollback($transaction_id);
+				}
 				throw new ProjectTemplateDeleteException("DB delete failed");
 			}
 			
 			if ($oldl->delete() == false)
 			{
-				$transaction->rollback($transaction_id);
+				if ($transaction_id != null)
+				{
+					$transaction->rollback($transaction_id);
+				}
 				throw new ProjectTemplateDeleteOLDLDeleteException();
 			}
 			else
 			{
-				$transaction->commit($transaction_id);
+				if ($transaction_id != null)
+				{
+					$transaction->commit($transaction_id);
+				}
 				return true;
 			}
 		}
@@ -307,20 +325,11 @@ class ProjectTemplate implements ProjectTemplateInterface
 					$value[1] = trim(strtolower($value[1]));
 					$value[2] = trim(strtolower($value[2]));
 			
-					if (is_array($value[3]))
-					{
-			    		if ($value[3]['id'] != "#" and $value[3]['type'] != "#")
-			    		{
-			    			$return_array[$counter]					= $value[3];
-				    		$return_array[$counter]['xml_element'] 	= $value[1];
-				    		$counter++;
-			    		}
-			    		else
-			    		{
-			    			$return_array[$counter]['xml_element'] 	= $value[1];
-			    			$return_array[$counter]['close']		= "1";
-			    			$counter++;
-			    		}
+		    		if ($value[3]['id'] != "#" and $value[3]['type'] != "#")
+		    		{
+		    			$return_array[$counter]					= $value[3];
+			    		$return_array[$counter]['xml_element'] 	= $value[1];
+			    		$counter++;
 		    		}
 		    		else
 		    		{
@@ -371,21 +380,12 @@ class ProjectTemplate implements ProjectTemplateInterface
 		    	
 		    	if ($in_status == true)
 		    	{
-		    		if (is_array($value[3]))
+		    		if ($value[3]['id'] != "#" and $value[3]['type'] != "#")
 		    		{
-			    		if ($value[3]['id'] != "#" and $value[3]['type'] != "#")
-			    		{
-				    		$return_array[$counter] 				= $value[3];
-				    		$return_array[$counter]['xml_element'] 	= $value[1];
-				    		$counter++;
-			    		}
-			    		else
-			    		{
-			    			$return_array[$counter]['xml_element'] 	= $value[1];
-			    			$return_array[$counter]['close']		= "1";
-			    			$counter++;
-			    		}
-			    		}
+			    		$return_array[$counter] 				= $value[3];
+			    		$return_array[$counter]['xml_element'] 	= $value[1];
+			    		$counter++;
+		    		}
 		    		else
 		    		{
 		    			$return_array[$counter]['xml_element'] 	= $value[1];
@@ -394,12 +394,9 @@ class ProjectTemplate implements ProjectTemplateInterface
 		    		}
 		    	}
 		    	
-		    	if (is_array($value[3]))
+		    	if ($value[1] == "status" and $value[3]['id'] == $status_id)
 		    	{
-			    	if ($value[1] == "status" and $value[3]['id'] == $status_id)
-			    	{
-						$in_status = true;
-			    	}
+					$in_status = true;
 		    	}
 		    }
 			return $return_array;
@@ -411,33 +408,198 @@ class ProjectTemplate implements ProjectTemplateInterface
 	}
 	
 	/**
-	 * @see ProjectTemplateInterface::get_all_status()
+	 * @see ProjectTemplateInterface::get_workflow_object()
 	 * @return array
 	 */
-	public function get_all_status()
+	public function get_workflow_object()
 	{
 		if ($this->project_template and $this->project_template_id)
 		{
 			$oldl = new Oldl($this->project_template->get_template_id());
 		    $xml_array = $oldl->get_cutted_xml_array("body");
 		    
-		    $return_array = array();
+		    $workflow = new Workflow();
+		    
+		    $decision_counter = 0;
+		    $parallel_counter = 0;
+		    
+		    $option_counter = array();
+		    $option_element_counter = array();
+		    
+		    $path_counter = array();
+		    $path_element_counter = array();
+		    
+		    $last_elements_array = array();
+		    $last_elements_array[0] = array();
+		    $use_last_elemets = false;
+		    
 		    
 		    foreach($xml_array as $key => $value)
 		    {
 		    	$value[0] = trim(strtolower($value[0]));
 				$value[1] = trim(strtolower($value[1]));
 				$value[2] = trim(strtolower($value[2]));
+
+				if ($value[1] == "decision" and $value[2] != "#")
+		    	{
+		    		$workflow_element_decision[$decision_counter] = new WorkflowElementOr();
+		    		
+		    		if ($use_last_elemets == true)
+		    		{
+		    			$workflow->add_element($workflow_element_decision[$decision_counter], true, $current_last_elements_array);
+		    			$use_last_elemets = false;
+		    			$current_last_elements_array = array();
+		    		}
+		    		else
+		    		{
+		    			$workflow->add_element($workflow_element_decision[$decision_counter]);
+		    		}
+		    		
+		    		$decision_counter++;
+		    		$option_counter[$decision_counter] = 0;
+		    		$option_element_counter[$decision_counter] = array();
+		    		$last_elements_array[$decision_counter] = array();
+		    	}
 		    	
-				if (is_array($value[3]))
-				{
-			    	if ($value[1] == "status" and is_numeric($value[3]['id']))
-			    	{
-			    		array_push($return_array, $value[3]['id']);
-			    	}
-				}
+		    	if ($value[1] == "decision" and $value[2] == "#")
+		    	{
+		    		// Dem n�chsten Element mitteilen, dass es die letzten Elemente der Options verarbeitet
+		    		$use_last_elemets = true;
+		    		// $last_elements_array[$decision_counter-1] = array_merge($last_elements_array[$decision_counter-1],$last_elements_array[$decision_counter]);
+		    		
+		    		if (is_array($current_last_elements_array) and count($current_last_elements_array) >= 1)
+		    		{
+		    			$current_last_elements_array = array_merge($current_last_elements_array, $last_elements_array[$decision_counter]);
+		    		}
+		    		else
+		    		{
+		    			$current_last_elements_array = $last_elements_array[$decision_counter];
+		    		}
+		    		
+		    		// !!! -> Altes Array in Temp array und das in Kind-EL Schreiben
+		    		
+		    		// Problem, wenn das Descision in Option liegt und danach weitere Options folgen
+		    		// Weitere Options m�ssen $use_last_elements ignorieren
+
+		    		// Pfad schreiben, wenn dc > 1, dann l�ngsten pfad ermitteln und zu oc addieren
+		    		
+		    		$workflow_element_decision[$decision_counter-1]->set_path_length($option_element_counter[$decision_counter]);
+		    		$decision_counter--;
+		    		
+		    		if ($decision_counter > 0)
+		    		{
+		    			$option_element_counter[$decision_counter][$option_counter[$decision_counter]] = $workflow_element_decision[$decision_counter]->get_longest_path_length()+1;
+		    		}
+		    	}
+		    	
+		   		if ($value[1] == "option" and $value[2] != "#")
+		    	{
+		    		if ($use_last_elemets == true)
+		    		{
+		    			$use_last_elemets = false;
+		    		}
+		    		
+		    		$workflow->set_current_element($workflow_element_decision[$decision_counter-1]);
+		    		
+		    		$option_counter[$decision_counter]++;
+		    		$option_element_counter[$decision_counter][$option_counter[$decision_counter]] = 0;
+		    		
+		    		// Zeiger vom Workflow wieder auf das Decision-Element
+		    	}
+		    	
+		    	if ($value[1] == "option" and $value[2] == "#")
+		    	{
+		    		// Alle letzten option-elemente sind (wenn kein goto) vor-element 
+		    		// des n�chsten Elements nach decision
+		    		
+		    		if ($goto == true)
+		    		{
+		    			$goto = false;
+		    		}
+		    		else
+		    		{
+			    		if (!in_array($workflow_element_status, $last_elements_array[$decision_counter]))
+			    		{
+			    			array_push($last_elements_array[$decision_counter], $workflow_element_status);
+			    		}
+		    		}
+		    	}
+		    	
+		    	if ($value[1] == "parallel" and $value[2] != "#")
+		    	{
+		    		
+		    	}
+		    	
+		    	if ($value[1] == "parallel" and $value[2] == "#")
+		    	{
+		    		
+		    	}
+		    	
+		   		if ($value[1] == "path" and $value[2] != "#")
+		    	{
+		    		
+		    	}
+		    	
+		   		if ($value[1] == "path" and $value[2] == "#")
+		    	{
+		    		
+		    	}
+		    	
+		    	
+		  		if ($value[1] == "goto" and $value[2] != "#")
+		    	{
+		    		$goto = true;
+		    		// Zwischenspeichern und nach der foreach-schleife bearbeiten
+		    	}
+		    	
+				
+		    	if ($value[1] == "status" and is_numeric($value[3]['id']))
+		    	{
+		    		if ($decision_counter != 0 and $option_counter != 0)
+		    		{
+		    			$option_element_counter[$decision_counter][$option_counter[$decision_counter]]++;
+		    		}
+		    		
+		    		$workflow_element_status = new WorkflowElementActivity($value[3][id]);
+		    		
+		    		if ($value[3]['requirement'] == "optional")
+    				{
+    					$workflow_element_status->attach("optional", true);
+    				}
+    				else
+    				{
+    					$workflow_element_status->attach("optional", false);
+    				}
+		    		
+		    		if ($use_last_elemets == true)
+		    		{
+		    			$workflow->add_element($workflow_element_status, true, $current_last_elements_array);
+		    			$use_last_elemets = false;
+		    			$current_last_elements_array = array();
+		    		}
+		    		else
+		    		{
+		    			$workflow->add_element($workflow_element_status);
+		    		}
+		    	}
 		    }
-			return $return_array;
+		    
+			$workflow_element_status = new WorkflowElementActivity(2);
+		    		
+    		if ($use_last_elemets == true)
+    		{
+    			$workflow->add_element($workflow_element_status, true, $current_last_elements_array);
+    			$use_last_elemets = false;
+    			$current_last_elements_array = array();
+    		}
+    		else
+    		{
+    			$workflow->add_element($workflow_element_status);
+    		}
+		    
+		    // $workflow->print_elements();
+		    
+			return $workflow;
 		
 		}
 		else
@@ -469,23 +631,20 @@ class ProjectTemplate implements ProjectTemplateInterface
 					$value[1] = trim(strtolower($value[1]));
 					$value[2] = trim(strtolower($value[2]));
 			    	
-					if (is_array($value[3]))
-					{
-			    		if ($value[1] == "status" and is_numeric($value[3]['id']))
+		    		if ($value[1] == "status" and is_numeric($value[3]['id']))
+		    		{
+			    		if ($status_found == false)
 			    		{
-				    		if ($status_found == false)
-				    		{
-				    			if ($value[3]['id'] == $status_id)
-				    			{
-				    				$status_found = true;
-				    			}
-				    		}
-				    		else
-				    		{
-				    			return $value[3]['id'];
-				    		}
-				    	}
-					}
+			    			if ($value[3]['id'] == $status_id)
+			    			{
+			    				$status_found = true;
+			    			}
+			    		}
+			    		else
+			    		{
+			    			return $value[3]['id'];
+			    		}
+			    	}
 			    }
 		    }
 		    return 2;
@@ -596,20 +755,17 @@ class ProjectTemplate implements ProjectTemplateInterface
 				$value[1] = trim(strtolower($value[1]));
 				$value[2] = trim(strtolower($value[2]));
 		    	
-				if (is_array($value[3]))
-				{
-			    	if ($value[1] == "status" and $value[3]['id'] == $status_id and $value[3]['id'] != "#" and $value[3]['type'] != "#")
-			    	{ 				    		
-			    		if ($value[3]['id'])
-			    		{
-			    			$return_array['id']	  			= $value[3]['id'];
-			    		}
-			    		if ($value[3]['requirement'])
-			    		{
-			    			$return_array['requirement']	= $value[3]['requirement'];
-			    		}
-			    	}
-				}
+		    	if ($value[1] == "status" and $value[3]['id'] == $status_id and $value[3]['id'] != "#" and $value[3]['type'] != "#")
+		    	{ 				    		
+		    		if ($value[3]['id'])
+		    		{
+		    			$return_array['id']	  			= $value[3]['id'];
+		    		}
+		    		if ($value[3]['requirement'])
+		    		{
+		    			$return_array['requirement']	= $value[3]['requirement'];
+		    		}
+		    	}
 		    }
 			return $return_array;
 		}

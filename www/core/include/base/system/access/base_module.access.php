@@ -3,7 +3,7 @@
  * @package base
  * @version 0.4.0.0
  * @author Roman Konertz <konertz@open-lims.org>
- * @copyright (c) 2008-2016 by Roman Konertz
+ * @copyright (c) 2008-2013 by Roman Konertz
  * @license GPLv3
  * 
  * This file is part of Open-LIMS
@@ -48,11 +48,9 @@ class BaseModule_Access
 		}
 		else
 		{
-			$sql = "SELECT * FROM ".constant("BASE_MODULE_TABLE")." WHERE id=:id";
-			$res = $db->prepare($sql);
-			$db->bind_value($res, ":id", $id, PDO::PARAM_INT);
-			$db->execute($res);
-			$data = $db->fetch($res);
+			$sql = "SELECT * FROM ".constant("BASE_MODULE_TABLE")." WHERE id='".$id."'";
+			$res = $db->db_query($sql);
+			$data = $db->db_fetch_assoc($res);
 			
 			if ($data['id'])
 			{
@@ -60,7 +58,15 @@ class BaseModule_Access
 				$this->name			= $data['name'];
 				$this->folder		= $data['folder'];
 				$this->class		= $data['class'];
-				$this->disabled		= $data['disabled'];
+				
+				if ($data['disabled'] == 't')
+				{
+					$this->disabled = true;
+				}
+				else
+				{
+					$this->disabled = false;
+				}
 			}
 			else
 			{
@@ -90,25 +96,29 @@ class BaseModule_Access
 	{
 		global $db;
 
-		if ($name and $folder and $class)
+		if ($name and $folder)
 		{
-	 		$sql_write = "INSERT INTO ".constant("BASE_MODULE_TABLE")." (id, name, folder, class, disabled) " .
-								"VALUES (nextval('".self::BASE_MODULE_PK_SEQUENCE."'::regclass), :name, :folder, :class,'f')";		
-				
-			$res_write = $db->prepare($sql_write);
-			$db->bind_value($res_write, ":name", $name, PDO::PARAM_STR);
-			$db->bind_value($res_write, ":folder", $folder, PDO::PARAM_STR);
-			$db->bind_value($res_write, ":class", $class, PDO::PARAM_STR);
-			$db->execute($res_write);
+			if (!$class)
+			{
+				$class_insert = "NULL";
+			}
+			else
+			{
+				$class_insert = "'".$class."'";
+			}
 			
-			if ($db->row_count($res_write) == 1)
+	 		$sql_write = "INSERT INTO ".constant("BASE_MODULE_TABLE")." (id, name, folder, class, disabled) " .
+								"VALUES (nextval('".self::BASE_MODULE_PK_SEQUENCE."'::regclass),'".$name."','".$folder."',".$class_insert.",'f')";		
+				
+			$res_write = $db->db_query($sql_write);
+			
+			if ($db->db_affected_rows($res_write) == 1)
 			{
 				$sql_read = "SELECT id FROM ".constant("BASE_MODULE_TABLE")." WHERE id = currval('".self::BASE_MODULE_PK_SEQUENCE."'::regclass)";
-				$res_read = $db->prepare($sql_read);
-				$db->execute($res_read);
-				$data_read = $db->fetch($res_read);
+				$res_read = $db->db_query($sql_read);
+				$data_read = $db->db_fetch_assoc($res_read);
 							
-				self::__construct($data_read['id']);		
+				$this->__construct($data_read['id']);		
 								
 				return $data_read['id'];
 			}
@@ -136,12 +146,10 @@ class BaseModule_Access
 			
 			$this->__destruct();
 
-			$sql = "DELETE FROM ".constant("BASE_MODULE_TABLE")." WHERE id = :id";
-			$res = $db->prepare($sql);
-			$db->bind_value($res, ":id", $id_tmp, PDO::PARAM_INT);
-			$db->execute($res);
+			$sql = "DELETE FROM ".constant("BASE_MODULE_TABLE")." WHERE id = '".$id_tmp."'";
+			$res = $db->db_query($sql);
 			
-			if ($db->row_count($res) == 1)
+			if ($db->db_affected_rows($res) == 1)
 			{
 				return true;
 			}
@@ -226,13 +234,10 @@ class BaseModule_Access
 
 		if ($this->id and $name)
 		{
-			$sql = "UPDATE ".constant("BASE_MODULE_TABLE")." SET name = :name WHERE id = :id";
-			$res = $db->prepare($sql);
-			$db->bind_value($res, ":id", $this->id, PDO::PARAM_INT);
-			$db->bind_value($res, ":name", $name, PDO::PARAM_STR);
-			$db->execute($res);
+			$sql = "UPDATE ".constant("BASE_MODULE_TABLE")." SET name = '".$name."' WHERE id = ".$this->id."";
+			$res = $db->db_query($sql);
 			
-			if ($db->row_count($res))
+			if ($db->db_affected_rows($res))
 			{
 				$this->name = $name;
 				return true;
@@ -258,13 +263,10 @@ class BaseModule_Access
 
 		if ($this->id and $folder)
 		{
-			$sql = "UPDATE ".constant("BASE_MODULE_TABLE")." SET folder = :folder WHERE id = :id";
-			$res = $db->prepare($sql);
-			$db->bind_value($res, ":id", $this->id, PDO::PARAM_INT);
-			$db->bind_value($res, ":folder", $folder, PDO::PARAM_STR);
-			$db->execute($res);
+			$sql = "UPDATE ".constant("BASE_MODULE_TABLE")." SET folder = '".$folder."' WHERE id = ".$this->id."";
+			$res = $db->db_query($sql);
 			
-			if ($db->row_count($res))
+			if ($db->db_affected_rows($res))
 			{
 				$this->folder = $folder;
 				return true;
@@ -290,13 +292,10 @@ class BaseModule_Access
 
 		if ($this->id and $class)
 		{
-			$sql = "UPDATE ".constant("BASE_MODULE_TABLE")." SET class = :class WHERE id = :id";
-			$res = $db->prepare($sql);
-			$db->bind_value($res, ":id", $this->id, PDO::PARAM_INT);
-			$db->bind_value($res, ":class", $class, PDO::PARAM_STR);
-			$db->execute($res);
+			$sql = "UPDATE ".constant("BASE_MODULE_TABLE")." SET class = '".$class."' WHERE id = ".$this->id."";
+			$res = $db->db_query($sql);
 			
-			if ($db->row_count($res))
+			if ($db->db_affected_rows($res))
 			{
 				$this->class = $class;
 				return true;
@@ -321,14 +320,20 @@ class BaseModule_Access
 		global $db;
 
 		if ($this->id and isset($disabled))
-		{			
-			$sql = "UPDATE ".constant("BASE_MODULE_TABLE")." SET disabled = :disabled WHERE id = :id";
-			$res = $db->prepare($sql);
-			$db->bind_value($res, ":id", $this->id, PDO::PARAM_INT);
-			$db->bind_value($res, ":disabled", $disabled, PDO::PARAM_BOOL);
-			$db->execute($res);
+		{
+			if ($disabled == true)
+			{
+				$disabled_insert = "t";
+			}
+			else
+			{
+				$disabled_insert = "f";
+			}
 			
-			if ($db->row_count($res))
+			$sql = "UPDATE ".constant("BASE_MODULE_TABLE")." SET disabled = '".$disabled_insert."' WHERE id = ".$this->id."";
+			$res = $db->db_query($sql);
+			
+			if ($db->db_affected_rows($res))
 			{
 				$this->disabled = $disabled;
 				return true;
@@ -355,11 +360,9 @@ class BaseModule_Access
 		
 		if (is_numeric($module_id))
 		{		
-			$sql = "SELECT name FROM ".constant("BASE_MODULE_TABLE")." WHERE id = :module_id";
-			$res = $db->prepare($sql);
-			$db->bind_value($res, ":module_id", $module_id, PDO::PARAM_INT);
-			$db->execute($res);
-			$data = $db->fetch($res);
+			$sql = "SELECT name FROM ".constant("BASE_MODULE_TABLE")." WHERE id = ".$module_id."";
+			$res = $db->db_query($sql);
+			$data = $db->db_fetch_assoc($res);
 			
 			if ($data['name'])
 			{
@@ -388,11 +391,9 @@ class BaseModule_Access
 		{		
 			$name = trim(strtolower($name));
 			
-			$sql = "SELECT id FROM ".constant("BASE_MODULE_TABLE")." WHERE TRIM(LOWER(name)) = :name";
-			$res = $db->prepare($sql);
-			$db->bind_value($res, ":name", $name, PDO::PARAM_STR);
-			$db->execute($res);
-			$data = $db->fetch($res);
+			$sql = "SELECT id FROM ".constant("BASE_MODULE_TABLE")." WHERE TRIM(LOWER(name)) = '".$name."'";
+			$res = $db->db_query($sql);
+			$data = $db->db_fetch_assoc($res);
 			
 			if ($data['id'])
 			{
@@ -410,22 +411,18 @@ class BaseModule_Access
 	}
 	
 	/**
-	 * @param param $name
+	 * @param param $module_name
 	 * @return bool
 	 */
-	public static function get_module_folder_by_module_name($name)
+	public static function get_module_folder_by_module_name($module_name)
 	{
 		global $db;
 		
-		if ($name)
+		if ($module_name)
 		{		
-			$name = trim(strtolower($name));
-			
-			$sql = "SELECT folder FROM ".constant("BASE_MODULE_TABLE")." WHERE TRIM(LOWER(name)) = :name";
-			$res = $db->prepare($sql);
-			$db->bind_value($res, ":name", $name, PDO::PARAM_STR);
-			$db->execute($res);
-			$data = $db->fetch($res);
+			$sql = "SELECT folder FROM ".constant("BASE_MODULE_TABLE")." WHERE TRIM(name) = '".trim($module_name)."'";
+			$res = $db->db_query($sql);
+			$data = $db->db_fetch_assoc($res);
 			
 			if ($data['folder'])
 			{
@@ -452,10 +449,9 @@ class BaseModule_Access
 		$return_array = array();
 		
 		$sql = "SELECT id, folder FROM ".constant("BASE_MODULE_TABLE")."";
-		$res = $db->prepare($sql);
-		$db->execute($res);
+		$res = $db->db_query($sql);
 		
-		while ($data = $db->fetch($res))
+		while ($data = $db->db_fetch_assoc($res))
 		{
 			$return_array[$data['id']] = $data['folder'];
 		}
@@ -480,9 +476,8 @@ class BaseModule_Access
 		$result_array = array();
 		
 		$sql = "SELECT id,name,folder,class FROM ".constant("BASE_MODULE_TABLE")." ORDER BY name";
-		$res = $db->prepare($sql);
-		$db->execute($res);
-		while ($data = $db->fetch($res))
+		$res = $db->db_query($sql);
+		while ($data = $db->db_fetch_assoc($res))
 		{
 			$result_array[$data['id']]['name']		= $data['name'];
 			$result_array[$data['id']]['folder']	= $data['folder'];
@@ -504,11 +499,9 @@ class BaseModule_Access
 		{		
 			$name = trim(strtolower($name));
 			
-			$sql = "SELECT id FROM ".constant("BASE_MODULE_TABLE")." WHERE TRIM(LOWER(name)) = :name";
-			$res = $db->prepare($sql);
-			$db->bind_value($res, ":name", $name, PDO::PARAM_STR);
-			$db->execute($res);
-			$data = $db->fetch($res);
+			$sql = "SELECT id FROM ".constant("BASE_MODULE_TABLE")." WHERE TRIM(LOWER(name)) = '".$name."'";
+			$res = $db->db_query($sql);
+			$data = $db->db_fetch_assoc($res);
 			
 			if ($data['id'])
 			{
